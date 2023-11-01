@@ -1,0 +1,324 @@
+---
+title: "Final_Ag_Hackathon_2023_Script"
+author: "Rajneesh Sharma"
+date: "11/1/2023"
+output: html_document
+---
+Setting Director and Importing files for training and Testing
+```{r, eval=FALSE}
+setwd("E:/GIS/SSSA_Aghackathon/SSSA_aghackathon/")
+
+library(readr)
+#For training
+final_vars <- read_excel("SSSA_AgHackathon_map/New_data/Training.xlsx")
+#For independent spatial testing
+test =  read_excel("SSSA_AgHackathon_map/New_data/Testing.xlsx")
+
+```
+
+Scaling testing data
+```{r, eval=FALSE}
+#Clalling requried libraraies
+library(readxl)
+library(splitTools)
+library(tidyverse)
+library(caret)
+
+Data <- test
+colnames(Data)
+
+#Sepreating predictors for scaling
+predictors=Data%>%
+  select("temp_09_tif",             "temp_10_tif",             "temp_11_tif",            
+ "temp_12_tif",             "temp_13_tif",             "prep_09_tif",            
+ "prep_10_tif",            "prep_11_tif",             "prep_12_tif" ,           
+ "prep_13_tif",             "spi_09",                  "spi_10" ,                
+ "spi_11",                  "spi_12",                  "spi_13" ,                
+ "di_09",                   "di_10",                   "di_11"  ,                
+ "di_12",                   "di_13",                   "st_200_e",               
+ "st_100_e",                "st_60_e",                 "cl_13_e",                
+ "cl_12_e",                 "cl_11_e",                 "cl_10_e"  )
+
+preProcValues <- preProcess(predictors, method = c("center", "scale"))#Fitting a distribution
+predictors_scaled <- predict(preProcValues, predictors)#Scaling data
+
+
+predictors_scaled$soc_0 = Data$soc_0_tif #Adding target variables back to scaled data
+predictors_scaled$soc_10 = Data$soc_10_tif
+predictors_scaled$soc_30 = Data$soc_30_tif
+predictors_scaled$site = Data$NAME #Spatial Variable
+Data_scaled= predictors_scaled
+
+# Load necessary libraries
+library(tidyverse)
+library(tidymodels)
+library(parsnip)
+#library(brotools)
+library(mlbench)
+
+data = Data_scaled #Cleaning data 
+data=na.omit(data)
+test_scaled = data
+
+#set.seed(3)
+#inds <- partition(data$site, p = c(train = 0.8, test = 0.2))
+#train <- data[inds$train, ]
+#test <- data[inds$test, ]
+```
+
+Scaling Training data
+```{r, eval=FALSE}
+library(readxl)
+library(splitTools)
+library(tidyverse)
+library(caret)
+
+Data <- final_vars
+colnames(Data)
+
+predictors=Data%>%
+  select("temp_09_tif",             "temp_10_tif",             "temp_11_tif",            
+ "temp_12_tif",             "temp_13_tif",             "prep_09_tif",            
+ "prep_10_tif",            "prep_11_tif",             "prep_12_tif" ,           
+ "prep_13_tif",             "spi_09",                  "spi_10" ,                
+ "spi_11",                  "spi_12",                  "spi_13" ,                
+ "di_09",                   "di_10",                   "di_11"  ,                
+ "di_12",                   "di_13",                   "st_200_e",               
+ "st_100_e",                "st_60_e",                 "cl_13_e",                
+ "cl_12_e",                 "cl_11_e",                 "cl_10_e"  )
+
+preProcValues <- preProcess(predictors, method = c("center", "scale"))
+predictors_scaled <- predict(preProcValues, predictors)
+
+
+predictors_scaled$soc_0 = Data$soc_0_tif
+predictors_scaled$soc_10 = Data$soc_10_tif
+predictors_scaled$soc_30 = Data$soc_30_tif
+predictors_scaled$site = Data$NAME
+Data_scaled= predictors_scaled
+
+# Load necessary libraries
+library(tidyverse)
+library(tidymodels)
+library(parsnip)
+#library(brotools)
+library(mlbench)
+
+data = Data_scaled
+data=na.omit(data)
+
+#set.seed(3)
+#inds <- partition(data$site, p = c(train = 0.8, test = 0.2))
+#train <- data[inds$train, ]
+#test <- data[inds$test, ]
+```
+
+Importing CAST library and selecting predictors
+```{r, eval=FALSE}
+#from mtry tuning
+#mse=c()
+
+#for (i in 1:30) {
+  
+library(caret)
+library(CAST)
+predictors <- c("temp_09_tif",             "temp_10_tif",             "temp_11_tif",            
+ "temp_12_tif",             "temp_13_tif",             "prep_09_tif",            
+ "prep_10_tif",            "prep_11_tif",             "prep_12_tif" ,           
+ "prep_13_tif",             "spi_09",                  "spi_10" ,                
+ "spi_11",                  "spi_12",                  "spi_13" ,                
+ "di_09",                   "di_10",                   "di_11"  ,                
+ "di_12",                   "di_13",                   "st_200_e",               
+ "st_100_e",                "st_60_e",                 "cl_13_e",                
+ "cl_12_e",                 "cl_11_e",                 "cl_10_e") 
+```
+
+#Predicting SOC 0-10 cm
+```{r, eval=FALSE}
+#Random model represents random splits in k folds i.e. without spatial blocking
+set.seed(10)
+random_model <- train(data[,predictors],data$soc_0,
+               method="rf",tuneGrid=data.frame("mtry"=1),
+               importance=TRUE,ntree=500,
+               trControl=trainControl(method="cv",number=3))
+
+predictions_random= predict(random_model, test_scaled, na.rm=TRUE)
+
+random_model_perf=lm(predictions_random~test_scaled$soc_0)
+summary(random_model_perf)
+
+#from mtry tuning
+#mse[i]=mse(predictions_random, test_scaled$soc_0)
+#}
+plot(varImp(random_model))
+```
+
+```{r, eval=FALSE}
+#LLO model is leave-location out models with spatial blocking
+set.seed(10)
+indices <- CreateSpacetimeFolds(data,spacevar = "site",
+                                k=5)
+set.seed(10)
+model_LLO <- train(data[,predictors],data$soc_0,
+                   method="rf",tuneGrid=data.frame("mtry"=1), importance=TRUE,
+                   trControl=trainControl(method="cv",
+                                          index = indices$index))
+model_LLO
+
+plot(varImp(model_LLO))
+
+predictions_LLO= predict(model_LLO,test_scaled, na.rm=TRUE)
+
+LLO_model_perf=lm(predictions_LLO~test_scaled$soc_0)
+summary(LLO_model_perf)
+```
+
+
+```{r, eval=FALSE}
+#forward feature selection and LLO based model
+set.seed(10)
+ffsmodel_LLO <- ffs(data[,predictors],data$soc_0, metric="RMSE",
+                    method="rf", tuneGrid=data.frame("mtry"=10),
+                    verbose=FALSE,ntree=500,
+                    trControl=trainControl(method="cv",
+                                           index = indices$index))
+ffsmodel_LLO
+
+ffsmodel_LLO$selectedvars
+
+plot(varImp(ffsmodel_LLO))
+
+predictions_ffsmodel_LLO= predict(ffsmodel_LLO,test, na.rm=TRUE)
+
+ffsmodel_LLO_model_perf=lm(predictions_ffsmodel_LLO~test_scaled$soc_0)
+summary(ffsmodel_LLO_model_perf)
+
+
+```
+
+#Predicting SOC 10-30 cm
+```{r, eval=FALSE}
+set.seed(10)
+random_model <- train(data[,predictors],data$soc_10 ,
+               method="rf",tuneGrid=data.frame("mtry"=1),
+               importance=TRUE,ntree=500,
+               trControl=trainControl(method="cv",number=3))
+
+predictions_random= predict(random_model, test_scaled, na.rm=TRUE)
+
+random_model_perf=lm(predictions_random~test_scaled$soc_10)
+summary(random_model_perf)
+
+#from mtry tuning
+#mse[i]=mse(predictions_random, test_scaled$soc_0)
+#}
+plot(varImp(random_model))
+```
+
+```{r, eval=FALSE}
+set.seed(10)
+indices <- CreateSpacetimeFolds(data,spacevar = "site",
+                                k=5)
+set.seed(10)
+model_LLO <- train(data[,predictors],data$soc_10,
+                   method="rf",tuneGrid=data.frame("mtry"=1), importance=TRUE,
+                   trControl=trainControl(method="cv",
+                                          index = indices$index))
+model_LLO
+
+plot(varImp(model_LLO))
+
+predictions_LLO= predict(model_LLO,test_scaled, na.rm=TRUE)
+
+LLO_model_perf=lm(predictions_LLO~test_scaled$soc_10)
+summary(LLO_model_perf)
+```
+
+
+```{r, eval=FALSE}
+set.seed(10)
+ffsmodel_LLO <- ffs(data[,predictors],data$soc_10, metric="RMSE",
+                    method="rf", tuneGrid=data.frame("mtry"=1),
+                    verbose=FALSE,ntree=500,
+                    trControl=trainControl(method="cv",
+                                           index = indices$index))
+ffsmodel_LLO
+
+ffsmodel_LLO$selectedvars
+
+plot(varImp(ffsmodel_LLO))
+
+predictions_ffsmodel_LLO= predict(ffsmodel_LLO,test, na.rm=TRUE)
+
+ffsmodel_LLO_model_perf=lm(predictions_ffsmodel_LLO~test_scaled$soc_10)
+summary(ffsmodel_LLO_model_perf)
+
+
+```
+
+#Predicting SOC 30-60 cm
+```{r, eval=FALSE}
+#mse=c()
+#for (i in 1:30) {
+
+set.seed(10)
+random_model <- train(data[,predictors],data$soc_30,
+               method="rf",tuneGrid=data.frame("mtry"=10),
+               importance=TRUE,ntree=500,
+               trControl=trainControl(method="cv",number=3))
+
+predictions_random= predict(random_model, test_scaled, na.rm=TRUE)
+
+random_model_perf=lm(predictions_random~test_scaled$soc_30)
+summary(random_model_perf)
+
+
+#from mtry tuning
+#mse[i]=mse(predictions_random, test_scaled$soc_30)
+#}
+plot(mse)
+plot(varImp(random_model))
+```
+
+```{r, eval=FALSE}
+set.seed(10)
+indices <- CreateSpacetimeFolds(data,spacevar = "site",
+                                k=5)
+set.seed(10)
+model_LLO <- train(data[,predictors],data$soc_30,
+                   method="rf",tuneGrid=data.frame("mtry"=1), importance=TRUE,
+                   trControl=trainControl(method="cv",
+                                          index = indices$index))
+model_LLO
+
+plot(varImp(model_LLO))
+
+predictions_LLO= predict(model_LLO,test_scaled, na.rm=TRUE)
+
+LLO_model_perf=lm(predictions_LLO~test_scaled$soc_30)
+summary(LLO_model_perf)
+```
+
+
+```{r, eval=FALSE}
+set.seed(10)
+ffsmodel_LLO <- ffs(data[,predictors],data$soc_30, metric="RMSE",
+                    method="rf", tuneGrid=data.frame("mtry"=10),
+                    verbose=FALSE,ntree=500,
+                    trControl=trainControl(method="cv",
+                                           index = indices$index))
+ffsmodel_LLO
+
+ffsmodel_LLO$selectedvars
+
+plot(varImp(ffsmodel_LLO))
+
+predictions_ffsmodel_LLO= predict(ffsmodel_LLO,test, na.rm=TRUE)
+
+ffsmodel_LLO_model_perf=lm(predictions_ffsmodel_LLO~test_scaled$soc_30)
+summary(ffsmodel_LLO_model_perf)
+
+
+```
+
+
