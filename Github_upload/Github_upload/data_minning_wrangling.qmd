@@ -1,0 +1,481 @@
+---
+title: "Ag Hackathon"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+```{r}
+library(stars)
+library(tidyverse)
+library(sf)
+library(janitor)
+library(dplyr)
+library(tigris)
+library(raster)
+# update.packages(oldPkgs = "stars")
+```
+
+```{r}
+prep <- read_csv("../data/Data Tables/RaCa_general_location.csv") %>% 
+  clean_names() %>% 
+  st_as_sf(coords = c("gen_long", "gen_lat"))
+
+gabound <- tigris::states() %>% 
+  clean_names() %>% 
+  filter(stusps == "GA")
+
+ggplot()+
+  geom_sf(data = gabound)
+```
+
+```{r}
+cropped_ga <- prep %>% 
+  st_set_crs(value = st_crs(gabound)) %>% 
+  st_intersection(gabound)
+
+ncss <- read_sf("../data/NCSS/NCSS_data_GA.shp") %>% 
+  clean_names() %>% 
+  st_transform(crs = st_crs(cropped_ga))
+
+ga_geom <- cropped_ga %>% 
+  dplyr::select(geometry)
+
+ncss_date <- ncss %>% 
+  dplyr::select(total_carb, organic_ca,
+                user_site, geometry, site_key) %>% 
+  mutate(date = as.numeric(substr(user_site, 2,5)),
+         datafrom = "NCSS") %>% 
+  filter(date >= 2010 & date <= 2015) %>% 
+  dplyr::select(-user_site)
+  
+ncss_geom <- ncss_date %>% 
+  dplyr::select(geometry)
+
+cropped <- bind_rows(ga_geom, ncss_geom)
+
+# cropped_buffer <- prep %>% 
+#   st_set_crs(value = st_crs(gabound)) %>% 
+#   st_intersection(gabound) %>% 
+#   st_buffer(dist = 2000)
+
+# ggplot()+
+#   geom_sf(data = cropped_buffer)+
+#   geom_sf(data = gabound, fill = NA)
+
+st_crs(cropped)
+```
+
+```{r}
+# ggplot()+
+#   geom_sf(data = cropped)+
+#   geom_sf(data = gabound, fill = NA)
+```
+
+```{r}
+# test_0 <- read_stars("../data/soc_0.tif") %>% 
+#   st_as_sf() %>% 
+#   st_set_crs(value = st_crs(cropped_buffer))
+# 
+# soc_test_0 <- st_intersection(test_0, cropped_buffer)
+# 
+# ggplot()+
+#   geom_stars(data = soc_test_0)+
+#   geom_sf(data = gabound, fill = NA)
+
+```
+
+# Soil Organic carbon at 0cm
+
+```{r}
+soc_0 <- read_stars("../data/soc_0.tif") %>% 
+  st_warp(crs = st_crs(cropped))
+
+soc_extract_0 <- st_extract(soc_0, cropped)
+```
+
+# Soil Organic carbon at 10cm
+
+```{r}
+soc_10 <- read_stars("../data/soc_10.tif") %>% 
+  st_warp(crs = st_crs(cropped))
+
+soc_extract_10 <- st_extract(soc_10, cropped)
+```
+
+# Merging the data
+
+```{r}
+soc_0_10 <- st_join(soc_extract_0, soc_extract_10, left = T)
+```
+
+# Soil Organic carbon at 30cm
+
+```{r}
+soc_30 <- read_stars("../data/soc_30.tif") %>% 
+  st_warp(crs = st_crs(cropped))
+
+soc_extract_30 <- st_extract(soc_30, cropped)
+```
+
+```{r}
+soc_0_30 <- st_join(soc_0_10, soc_extract_30, left = T)
+```
+
+# Open land soil texture classification 0cm
+
+```{r}
+class_0 <- raster("../data/0 cm.tif")
+
+st_0 <- extract(class_0, cropped)
+
+st_0_sf <- cbind(cropped, st_0) %>% 
+  dplyr::select(st_0, geometry)
+```
+
+# Crop Land data 2009
+
+```{r}
+crop_land <- raster("../data/polygonclip_20231027140758_1479754908/CDL_2009_13.tif")
+
+cl_09 <- extract(crop_land, cropped)
+
+cl_09_sf <- cbind(cropped, cl_09) %>% 
+  dplyr::select(cl_09, geometry)
+
+st_crs(cl_09_sf)
+```
+
+# Merrging crop land and soiltexture 0cm
+
+```{r}
+cl_merged <- st_join(soc_0_30, cl_09_sf, left = T)
+
+st_0 <- st_join(cl_merged, st_0_sf, left = T)
+
+```
+
+# Open land soil texture classification 30cm
+
+```{r}
+st_30 <- raster("../data/30 cm.tif")
+
+st_30_e <- extract(st_30, cropped)
+
+st_30_sf <- cbind(cropped, st_30_e) %>% 
+  dplyr::select(st_30_e, geometry)
+
+st_30_merged <- st_join(st_0, st_30_sf)
+```
+
+# Crop Land data 2010
+
+```{r}
+cl_10 <- raster("../data/polygonclip_20231027140758_1479754908/CDL_2010_13.tif")
+
+cl_10_e <- extract(cl_10, cropped)
+length(cl_10_e)
+
+cl_10_merged <- cbind(cropped, cl_10_e) %>% 
+  dplyr::select(cl_10_e, geometry) %>% 
+  st_join(st_30_merged, left = T)
+```
+
+# Crop Land data 2011
+
+```{r}
+cl_11 <- raster("../data/polygonclip_20231027140758_1479754908/CDL_2011_13.tif")
+
+cl_11_e <- extract(cl_11, cropped)
+length(cl_11_e)
+
+cl_11_merged <- cbind(cropped, cl_11_e) %>% 
+  dplyr::select(cl_11_e, geometry) %>% 
+  st_join(cl_10_merged, left = T)
+```
+
+# Crop Land data 2012
+
+```{r}
+cl_12 <- raster("../data/polygonclip_20231027140758_1479754908/CDL_2012_13.tif")
+
+cl_12_e <- extract(cl_12, cropped)
+length(cl_12_e)
+
+cl_12_merged <- cbind(cropped, cl_12_e) %>% 
+  dplyr::select(cl_12_e, geometry) %>% 
+  st_join(cl_11_merged, left = T)
+```
+
+# Crop Land data 2013
+
+```{r}
+cl_13 <- raster("../data/polygonclip_20231027140758_1479754908/CDL_2013_13.tif")
+
+cl_13_e <- extract(cl_13, cropped)
+length(cl_13_e)
+
+cl_13_merged <- cbind(cropped, cl_13_e) %>% 
+  dplyr::select(cl_13_e, geometry) %>% 
+  st_join(cl_12_merged, left = T)
+```
+
+```{r}
+st_60 <- raster("../data/60 cm.tif")
+
+st_60_e <- extract(st_60, cropped)
+length(st_60_e)
+
+st_60_merged <- cbind(cropped, st_60_e) %>% 
+  dplyr::select(st_60_e, geometry) %>% 
+  st_join(cl_13_merged, left = T)
+```
+
+```{r}
+st_100 <- raster("../data/100 cm.tif")
+
+st_100_e <- extract(st_100, cropped)
+length(st_100_e)
+
+st_100_merged <- cbind(cropped, st_100_e) %>% 
+  dplyr::select(st_100_e, geometry) %>% 
+  st_join(st_60_merged, left = T)
+```
+
+```{r}
+st_200 <- raster("../data/200 cm.tif")
+
+st_200_e <- extract(st_200, cropped)
+length(st_200_e)
+
+st_200_merged <- cbind(cropped, st_200_e) %>% 
+  dplyr::select(st_200_e, geometry) %>% 
+  st_join(st_100_merged, left = T)
+```
+
+```{r}
+drought_08 <- read_stars("../data/drought_index_08.tif") %>% 
+  st_warp(crs = st_crs(cropped))
+
+d_08_e <- st_extract(drought_08, cropped) %>% 
+  st_join(st_200_merged, left = T)
+```
+
+# Drought Index 08-13
+
+## PDSI
+
+```{r}
+files <- list.files(path = "../data/Drought Index/", pattern = "*tif", full.names = T)
+```
+
+```{r}
+di <- list()
+
+for (i in 1: length(files)) {
+  file_name <- files[[i]]
+  object_name <- tools::file_path_sans_ext(basename(file_name))
+  di[[object_name]] <- read_stars(file_name) %>% 
+    st_warp(crs = st_crs(cropped))
+}
+
+```
+
+```{r}
+extracted <- function(df){
+  df %>% 
+    st_extract(cropped)
+}
+```
+
+```{r}
+all_extracted <- lapply(di, extracted)
+```
+
+```{r}
+filtered_e <- do.call(cbind, all_extracted) %>% 
+  dplyr::select(geometry = di_09.geometry,
+                di_09 = di_09.di_09.tif,
+                di_10 = di_10.di_10.tif,
+                di_11 = di_11.di_11.tif,
+                di_12 = di_12.di_12.tif,
+                di_13 = di_13.di_13.tif)
+
+pdsi_merged <- st_join(filtered_e, st_200_merged, left = T)
+```
+
+## SPI
+
+```{r}
+files <- list.files(path = "../data/Drought Index/SPI/", pattern = "*tif", full.names = T)
+
+spi <- list()
+
+for (i in 1:length(files)) {
+  file_name <- files[i]
+  object_name <- tools::file_path_sans_ext(basename(file_name))
+  spi[[object_name]] <- read_stars(file_name) %>% 
+    st_warp(crs = st_crs(cropped))
+}
+
+spi$spi09
+
+extract_spi <- function(df){
+  df %>% 
+    st_extract(cropped)
+}
+
+extracted_spi <- lapply(spi, extract_spi)
+
+filtered_spi <- do.call(cbind, extracted_spi) %>% 
+  dplyr::select(geometry = spi09.geometry,
+                spi_09 = spi09.spi09.tif,
+                spi_10 = spi10.spi10.tif,
+                spi_11 = spi11.spi11.tif,
+                spi_12 = spi12.spi12.tif,
+                spi_13 = spi13.spi13.tif)
+
+spi_merged <- st_join(filtered_spi, pdsi_merged, left = T)
+```
+
+# Precipitaion
+
+```{r}
+files <- list.files(path = "../data/prep/", pattern = "*tif", full.names = T)
+
+precp <- list()
+
+for (i in 1:length(files)) {
+  file_name <- files[i]
+  object_name <- tools::file_path_sans_ext(basename(file_name))
+  precp[[object_name]] <- read_stars(file_name) %>% 
+    st_warp(crs = st_crs(cropped))
+}
+
+precp$prep_09
+
+extract_precp <- function(df){
+  df %>% 
+    st_extract(cropped)
+}
+
+extracted_precp <- lapply(precp, extract_precp)
+
+# merge_precp <- function(df){
+#   df %>% 
+#     st_join(spi_merged)
+# }
+# 
+# lapply(extracted_precp, merge_precp)
+do.call(cbind, extracted_precp)
+
+filtered_pre <- do.call(bind_cols, extracted_precp) %>% 
+  dplyr::select(contains(".tif"),
+                geometry = geometry...2) %>% 
+  st_as_sf() %>% 
+  st_set_crs(value = st_crs(spi_merged))
+#   dplyr::select(geometry = spi09.geometry,
+#                 spi_09 = spi09.spi09.tif,
+#                 spi_10 = spi10.spi10.tif,
+#                 spi_11 = spi11.spi11.tif,
+#                 spi_12 = spi12.spi12.tif,
+#                 spi_13 = spi13.spi13.tif)
+
+prep_merged <- st_join(filtered_pre, spi_merged, left = T)
+```
+
+
+```{r}
+files <- list.files(path = "../data/Temperature/", pattern = "*tif", full.names = T)
+
+temp <- list()
+
+for (i in 1:length(files)) {
+  file_name <- files[i]
+  object_name <- tools::file_path_sans_ext(basename(file_name))
+  temp[[object_name]] <- read_stars(file_name) %>% 
+    st_warp(crs = st_crs(cropped))
+}
+
+temp$temp_09
+
+extract_temp <- function(df){
+  df %>% 
+    st_extract(cropped)
+}
+
+extracted_temp <- lapply(temp, extract_temp)
+
+# merge_precp <- function(df){
+#   df %>% 
+#     st_join(spi_merged)
+# }
+# 
+# lapply(extracted_precp, merge_precp)
+# do.call(cbind, extracted_temp)
+
+filtered_temp <- do.call(bind_cols, extracted_temp) %>% 
+  dplyr::select(contains(".tif"),
+                geometry = geometry...2) %>% 
+  st_as_sf() %>% 
+  st_set_crs(value = st_crs(spi_merged))
+#   dplyr::select(geometry = spi09.geometry,
+#                 spi_09 = spi09.spi09.tif,
+#                 spi_10 = spi10.spi10.tif,
+#                 spi_11 = spi11.spi11.tif,
+#                 spi_12 = spi12.spi12.tif,
+#                 spi_13 = spi13.spi13.tif)
+
+prep_merged <- st_join(filtered_temp, prep_merged, left = T) 
+
+all_var_sf <- prep_merged 
+  # as.data.frame() %>% 
+  # mutate(x = st_coordinates(.$geometry)[,1],
+  #        y = st_coordinates(.$geometry)[,2])
+```
+
+```{r}
+soc_raca <- read_csv("../data/Data Tables/RaCA_SOC_pedons.csv") %>% 
+  clean_names() %>% 
+  dplyr::select(ra_ca_id = rcasiteid,
+                so_cstock5,
+                so_cstock30,
+                so_cstock100)
+```
+
+```{r}
+raca_id <- cropped_ga %>% 
+  dplyr::select(ra_ca_id, geometry) %>% 
+  mutate(date = 2010,
+         datafrom = "raca",
+         total_carb = NA,
+         organic_ca = NA) %>% 
+  merge(soc_raca, by = "ra_ca_id") %>% 
+  st_set_crs(value = st_crs(all_var_sf))
+
+ncss_id <- ncss_date %>% 
+  rename(ra_ca_id = site_key) %>% 
+  mutate_at(.vars = "ra_ca_id", as.character) %>% 
+  bind_rows(raca_id)
+
+st_crs(ncss_id)
+
+all_vars_df <- all_var_sf %>% 
+  st_join(ncss_id) %>% 
+  as.data.frame() %>% 
+  mutate(x = st_coordinates(geometry)[,1],
+         y = st_coordinates(geometry)[,2])
+
+```
+
+```{r}
+write_csv(all_vars_df, "../output/final_all_df_with_ncss.csv")
+```
+
+```{r}
+ncss <- read_cs
+```
+
